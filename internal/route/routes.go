@@ -10,13 +10,13 @@ func AuthRoutes(r *gin.Engine, pg *data.Postgres) {
 	auth := r.Group("/auth") 
 
 	auth.POST("/register", controller.Register(pg.DB))
-	auth.POST("/signin", controller.SignIn(pg.DB))
-	auth.POST("/signout", controller.SignOut(pg.DB))
+	auth.POST("/login", controller.SignIn(pg.DB))
+	auth.POST("/logout", controller.SignOut(pg.DB))
 	auth.POST("/refresh", controller.RefreshToken(pg.DB))
 }
 
-// func UserRoutes(r *gin.Engine) {
-// 	user := r.Group("/users") 
+func UserRoutes(r *gin.Engine) {
+	user := r.Group("/user") 
 
-// 	user.GET("/me", handler.AuthMe())
-// }
+	user.GET("/profile", controller.AuthMe())
+}
