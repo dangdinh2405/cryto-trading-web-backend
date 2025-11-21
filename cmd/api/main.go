@@ -11,6 +11,9 @@ import (
 
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/data"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/route"
+	"github.com/dangdinh2405/cryto-trading-web-backend/internal/repo"
+	"github.com/dangdinh2405/cryto-trading-web-backend/internal/handler"
+	"github.com/dangdinh2405/cryto-trading-web-backend/internal/service"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/middleware"
 	
 )
@@ -40,12 +43,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	marketRepo := repo.NewMarketRepo(db.DB)
+	orderRepo  := repo.NewOrderRepo(db.DB)
+	tradeRepo  := repo.NewTradeRepo(db.DB)
+	walletRepo := repo.NewWalletRepo(db.DB)
+
+	orderService := service.NewOrderService(db.DB, marketRepo, orderRepo, tradeRepo, walletRepo)
+
+	handle := handler.NewHandler(orderService)
+
 	route.AuthRoutes(r, db)
 
 	r.Use(middleware.RequireAuth(db.DB))
 	
 	route.UserRoutes(r, db)
-
+	handle.RegisterRoutes(r)
 
 	defer db.Close()
 

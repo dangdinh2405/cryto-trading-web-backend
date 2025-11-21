@@ -20,7 +20,7 @@ type UserContext struct {
 	Username       string     `json:"username"`
 	Email          string     `json:"email"`
 	Phone          string    `json:"phone_number"`
-	Brithday       time.Time `json:"birthday"`
+	Birthday       time.Time `json:"birthday"`
 	AvatarURL      *string    `json:"avatar_url"`
 	Passkey		   bool    	  `json:"passkey_enabled"`
 	Status    	   string     `json:"status"`
@@ -92,7 +92,7 @@ func RequireAuth(db *sql.DB) gin.HandlerFunc {
 			username       string     
 			email          string     
 			phone_number          string    
-			brithday       time.Time 
+			birthday       time.Time 
 			avatar_url      *string    
 			passkey_enabled		   bool    	  
 			status    	   string         
@@ -105,7 +105,7 @@ func RequireAuth(db *sql.DB) gin.HandlerFunc {
 			FROM users
 			WHERE id = $1
 			  AND status = 'active'
-		`, userID).Scan(&id, &first_name, &last_name, &username, &email, &phone_number, &brithday, &avatar_url, &passkey_enabled, &status, &created_at, &updated_at)
+		`, userID).Scan(&id, &first_name, &last_name, &username, &email, &phone_number, &birthday, &avatar_url, &passkey_enabled, &status, &created_at, &updated_at)
 
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -125,7 +125,7 @@ func RequireAuth(db *sql.DB) gin.HandlerFunc {
 			Username   : username,
 			Email      : email,
 			Phone      : phone_number,
-			Brithday   : brithday,
+			Birthday   : birthday,
 			AvatarURL  : avatar_url,
 			Passkey	   : passkey_enabled,
 			Status     : status,
