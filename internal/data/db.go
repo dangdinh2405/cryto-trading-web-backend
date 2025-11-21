@@ -23,7 +23,7 @@ func NewPostgres() (*Postgres, error) {
 	dbname := os.Getenv("POSTGRES_DB_NAME")
 
 	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=require",
+		"postgres://%s:%s@%s:%s/%s?sslmode=disable", // sslmode=require for publish
 		user, pass, host, port, dbname,
 	)
 

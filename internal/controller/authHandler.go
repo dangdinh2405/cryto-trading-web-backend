@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"time"
+	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -145,6 +146,21 @@ func Register(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+
+func LogLoginActivity(db *sql.DB, userID uuid.UUID, ip, userAgent string, success bool) {
+    ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+    defer cancel()
+
+    _, err := db.ExecContext(ctx, `
+        INSERT INTO login_activities (user_id, ip_address, user_agent, location, successful)
+        VALUES ($1, $2, $3, $4, $5)
+    `, userID, ip, userAgent, nil, success)
+    if err != nil {
+        log.Println("LogLoginActivity error:", err)
+    }
+}
+
+
 func SignIn(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jwtSecret := os.Getenv("ACCESS_TOKEN_SECRET")
@@ -257,6 +273,8 @@ func SignIn(db *sql.DB) gin.HandlerFunc {
 			secure,
 			true, // httpOnly
 		)
+		
+		LogLoginActivity(db, userID, ipAddr, c.Request.UserAgent(), true)
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "User " + displayName + " đã logged in!",

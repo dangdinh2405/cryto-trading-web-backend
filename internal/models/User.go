@@ -17,7 +17,6 @@ type User struct {
 	AvatarURL      *string    `db:"avatar_url" json:"avatar_url"`
     Passkey		   bool    	  `db:"passkey_enabled" json:"passkey_enabled"`
     Status    	   string     `db:"status" json:"status"`
-    DisplayName    string     `db:"display_name" json:"displayName"`
     CreatedAt      time.Time  `db:"created_at" json:"createdAt"`
     UpdatedAt      time.Time  `db:"updated_at" json:"updatedAt"`
 }

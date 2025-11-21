@@ -43,7 +43,8 @@ func main() {
 	route.AuthRoutes(r, db)
 
 	r.Use(middleware.RequireAuth(db.DB))
-	route.UserRoutes(r)
+	
+	route.UserRoutes(r, db)
 
 
 	defer db.Close()

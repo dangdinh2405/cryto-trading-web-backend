@@ -15,8 +15,10 @@ func AuthRoutes(r *gin.Engine, pg *data.Postgres) {
 	auth.POST("/refresh", controller.RefreshToken(pg.DB))
 }
 
-func UserRoutes(r *gin.Engine) {
+func UserRoutes(r *gin.Engine, pg *data.Postgres) {
 	user := r.Group("/user") 
 
-	user.GET("/profile", controller.AuthMe())
+	user.GET("/profile", controller.AuthMe())	
+	user.GET("/login-activity", controller.GetLoginActivityHandler(pg.DB))
+	user.GET("/balance", controller.GetUserBalance(pg.DB))
 }
