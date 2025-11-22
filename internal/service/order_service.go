@@ -290,10 +290,11 @@ func (s *OrderService) CancelOrder(ctx context.Context, userID, orderID string) 
 		if err := s.refundRemaining(ctx, tx, market, o, remaining, models.Canceled); err != nil {
 			return err
 		}
-	} else {
-		if err := s.order.Cancel(ctx, tx, o.ID); err != nil { return err }
+	} 
+	if err := s.order.Cancel(ctx, tx, o.ID); err != nil { 
+		return err 
 	}
-
+	
 	return tx.Commit()
 }
 
