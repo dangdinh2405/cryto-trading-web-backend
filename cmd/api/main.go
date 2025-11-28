@@ -10,7 +10,7 @@ import (
 	"github.com/gin-contrib/cors"
 
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/data"
-	"github.com/dangdinh2405/cryto-trading-web-backend/internal/route"
+	"github.com/dangdinh2405/cryto-trading-web-backend/internal/routes"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/repo"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/handler"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/service"
@@ -27,7 +27,7 @@ func main() {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Upgrade", "Connection"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           24 * time.Hour,
@@ -50,13 +50,14 @@ func main() {
 
 	orderService := service.NewOrderService(db.DB, marketRepo, orderRepo, tradeRepo, walletRepo)
 
-	handle := handler.NewHandler(orderService)
+	handle := handler.NewHandler(orderService, marketRepo)
 
-	route.AuthRoutes(r, db)
+	routes.AuthRoutes(r, db)
+	routes.WebSocketRoutes(r, handle)
 
 	r.Use(middleware.RequireAuth(db.DB))
 	
-	route.UserRoutes(r, db)
+	routes.UserRoutes(r, db)
 	handle.RegisterRoutes(r)
 
 	defer db.Close()

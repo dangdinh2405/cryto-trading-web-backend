@@ -36,12 +36,25 @@ func (s *OrderService) PlaceOrder(ctx context.Context, userID string, req PlaceO
 	if err != nil { return nil, nil, err }
 
 	// validate
-	if req.Amount <= 0 { return nil, nil, errors.New("amount must be > 0") }
+	if req.Type == models.OrderTypeMarket && req.Side == models.Buy {
+		// Market buy only needs quote_amount_max
+		if req.QuoteAmountMax == nil || *req.QuoteAmountMax <= 0 {
+			return nil, nil, errors.New("market buy requires quote_amount_max > 0")
+		}
+	} else {
+		// All other orders need amount
+		if req.Amount <= 0 { return nil, nil, errors.New("amount must be > 0") }
+	}
 	if req.Type == models.OrderTypeLimit && req.Price == nil {
 		return nil, nil, errors.New("limit order requires price")
 	}
 	if req.Type == models.OrderTypeMarket  && req.Price != nil {
 		return nil, nil, errors.New("market order must not have price")
+	}
+	
+	// Market orders cannot be GTC (they must execute immediately or cancel)
+	if req.Type == models.OrderTypeMarket && req.TIF == models.GTC {
+		return nil, nil, errors.New("market orders cannot use GTC (use IOC or FOK)")
 	}
 
 	// POST_ONLY precheck
@@ -57,10 +70,18 @@ func (s *OrderService) PlaceOrder(ctx context.Context, userID string, req PlaceO
 	}
 
 	// insert taker order
+	// For market buy, Amount will be nil initially and updated during matching
+	var amount *float64
+	if req.Type == models.OrderTypeMarket && req.Side == models.Buy {
+		amount = nil // Will be calculated during matching
+	} else {
+		amount = &req.Amount
+	}
 	taker := &models.Order{
 		UserID: userID, MarketID: req.MarketID,
 		Side: req.Side, Type: req.Type, Price: req.Price,
-		Amount: req.Amount, FilledAmount: 0,
+		Amount: amount, FilledAmount: 0,
+		QuoteAmountMax: req.QuoteAmountMax,
 		Status: models.Open, Fee: 0, TIF: req.TIF,
 	}
 	if err := s.order.Insert(ctx, tx, taker); err != nil {
@@ -87,7 +108,16 @@ func (s *OrderService) lockFunds(ctx context.Context, tx *sql.Tx, market *models
 	switch req.Side {
 	case models.Buy:
 		if req.Type == models.OrderTypeMarket{
-			return errors.New("MVP: market buy chưa implement, cần quote_amount_max")
+			// Market buy requires quote_amount_max
+			if req.QuoteAmountMax == nil {
+				return errors.New("MVP: market buy chưa implement, cần quote_amount_max")
+			}
+			cost := *req.QuoteAmountMax
+			w, err := s.wallet.GetForUpdate(ctx, tx, userID, quote)
+			if err != nil { return err }
+			if w.Balance < cost { return errors.New("insufficient quote balance") }
+
+			return s.wallet.UpdateBalances(ctx, tx, userID, quote, -cost, +cost)
 		}
 
 		cost := (*req.Price) * req.Amount
@@ -110,20 +140,59 @@ func (s *OrderService) lockFunds(ctx context.Context, tx *sql.Tx, market *models
 // ---------------- MATCHING ----------------
 func (s *OrderService) match(ctx context.Context, tx *sql.Tx, market *models.Market, taker *models.Order) ([]*models.Trade, error) {
 	var out []*models.Trade
+	var totalQuoteSpent float64 // Track total quote spent for market buy
+	var totalBaseBought float64 // Track total base bought for market buy
 
-	for taker.Amount-taker.FilledAmount > 1e-12 {
+	// For market buy: continue while we have quote budget remaining
+	// For others: continue while we have amount remaining to fill
+	for {
+		// Check stopping condition
+		if taker.Type == models.OrderTypeMarket && taker.Side == models.Buy {
+			if taker.QuoteAmountMax == nil || totalQuoteSpent >= *taker.QuoteAmountMax-1e-8 {
+				break
+			}
+		} else {
+			if taker.Amount == nil || *taker.Amount-taker.FilledAmount <= 1e-12 {
+				break
+			}
+		}
+
 		makers, err := s.order.SelectMakersForUpdate(ctx, tx, taker.MarketID, taker.Side, taker.Type, taker.Price, 50)
 		if err != nil { return nil, err }
 		if len(makers) == 0 { break }
 
 		for _, maker := range makers {
-			if taker.Amount-taker.FilledAmount <= 1e-12 { break }
+			// Check stopping condition again for each maker
+			if taker.Type == models.OrderTypeMarket && taker.Side == models.Buy {
+				if totalQuoteSpent >= *taker.QuoteAmountMax-1e-8 {
+					break
+				}
+			} else {
+				if taker.Amount == nil || *taker.Amount-taker.FilledAmount <= 1e-12 {
+					break
+				}
+			}
 
-			takerRem := taker.Amount - taker.FilledAmount
-			makerRem := maker.Amount - maker.FilledAmount
-			tradeAmt := math.Min(takerRem, makerRem)
+			if maker.Amount == nil {
+				continue // Skip makers without amount
+			}
+			makerRem := *maker.Amount - maker.FilledAmount
+			tradePrice := *maker.Price // maker price
 
-			tradePrice := *maker.Price           // maker price
+			var tradeAmt float64
+			if taker.Type == models.OrderTypeMarket && taker.Side == models.Buy {
+				// For market buy: calculate max amount we can buy with remaining quote
+				quoteRemaining := *taker.QuoteAmountMax - totalQuoteSpent
+				maxAmtByQuote := quoteRemaining / tradePrice
+				tradeAmt = math.Min(maxAmtByQuote, makerRem)
+			} else {
+				// For normal orders: match by amount
+				takerRem := *taker.Amount - taker.FilledAmount
+				tradeAmt = math.Min(takerRem, makerRem)
+			}
+
+			if tradeAmt <= 1e-12 { break }
+
 			quoteAmt := tradePrice * tradeAmt
 
 			feeTaker := quoteAmt * s.feeRate
@@ -145,11 +214,24 @@ func (s *OrderService) match(ctx context.Context, tx *sql.Tx, market *models.Mar
 			// update fills
 			maker.FilledAmount += tradeAmt
 			taker.FilledAmount += tradeAmt
+			
+			// For market buy, track total bought and quote spent
+			if taker.Type == models.OrderTypeMarket && taker.Side == models.Buy {
+				totalBaseBought += tradeAmt
+				totalQuoteSpent += quoteAmt
+			}
 
 			makerStatus := models.PartiallyFilled
-			if maker.FilledAmount >= maker.Amount-1e-12 { makerStatus = models.Filled }
+			if *maker.Amount >= maker.FilledAmount-1e-12 { makerStatus = models.Filled }
 			takerStatus := models.PartiallyFilled
-			if taker.FilledAmount >= taker.Amount-1e-12 { takerStatus = models.Filled }
+			if taker.Type == models.OrderTypeMarket && taker.Side == models.Buy {
+				// For market buy, check if we've spent all our quote budget
+				if totalQuoteSpent >= *taker.QuoteAmountMax-1e-8 {
+					takerStatus = models.Filled
+				}
+			} else {
+				if taker.Amount != nil && taker.FilledAmount >= *taker.Amount-1e-12 { takerStatus = models.Filled }
+			}
 
 			if err := s.order.UpdateFill(ctx, tx, maker.ID, maker.FilledAmount, makerStatus); err != nil { return nil, err }
 			if err := s.order.UpdateFill(ctx, tx, taker.ID, taker.FilledAmount, takerStatus); err != nil { return nil, err }
@@ -162,6 +244,12 @@ func (s *OrderService) match(ctx context.Context, tx *sql.Tx, market *models.Mar
 			out = append(out, tr)
 		}
 	}
+	
+	// For market buy, update the Amount field to reflect total bought
+	if taker.Type == models.OrderTypeMarket && taker.Side == models.Buy && totalBaseBought > 0 {
+		taker.Amount = &totalBaseBought
+	}
+	
 	return out, nil
 }
 
@@ -173,8 +261,17 @@ func (s *OrderService) settle(ctx context.Context, tx *sql.Tx, market *models.Ma
 	cost := price * amount
 
 	if taker.Side == models.Buy {
-		lockedCost := (*taker.Price) * amount
-		refund := lockedCost - cost
+		var lockedCost, refund float64
+		if taker.Type == models.OrderTypeMarket {
+			// For market buy, we locked quote_amount_max upfront
+			// Unlock the actual cost and refund will be handled in applyTIF
+			lockedCost = cost
+			refund = 0
+		} else {
+			// For limit buy, refund difference between limit price and trade price
+			lockedCost = (*taker.Price) * amount
+			refund = lockedCost - cost
+		}
 
 		// taker quote
 		if err := s.wallet.UpdateBalances(ctx, tx, taker.UserID, quote, +refund, -lockedCost); err != nil { return err }
@@ -204,21 +301,27 @@ func (s *OrderService) settle(ctx context.Context, tx *sql.Tx, market *models.Ma
 
 // ---------------- APPLY TIF ----------------
 func (s *OrderService) applyTIF(ctx context.Context, tx *sql.Tx, market *models.Market, taker *models.Order) error {
-	remaining := taker.Amount - taker.FilledAmount
+	if taker.Amount == nil {
+		return nil // No remaining for market buy without amount
+	}
+	remaining := *taker.Amount - taker.FilledAmount
 	if remaining <= 1e-12 { return nil }
 
-	// market leftover
-	if taker.Type == models.OrderTypeMarket{
-		return s.refundRemaining(ctx, tx, market, taker, remaining, models.Rejected)
-	}
-
+	// Apply TIF logic (market orders also follow TIF)
 	switch taker.TIF {
 	case models.GTC:
+		// Market orders cannot be GTC in practice, but if somehow it happens, cancel it
+		if taker.Type == models.OrderTypeMarket {
+			return s.refundRemaining(ctx, tx, market, taker, remaining, models.Canceled)
+		}
 		return nil
 	case models.IOC:
 		return s.refundRemaining(ctx, tx, market, taker, remaining, models.Canceled)
 	case models.FOK:
-		return s.refundRemaining(ctx, tx, market, taker, remaining, models.Expired)
+		return s.refundRemaining(ctx, tx, market, taker, remaining, models.Rejected)
+	case models.PostOnly:
+		// POST_ONLY should have been checked earlier, but handle gracefully
+		return s.refundRemaining(ctx, tx, market, taker, remaining, models.Canceled)
 	}
 	return nil
 }
@@ -230,7 +333,24 @@ func (s *OrderService) refundRemaining(ctx context.Context, tx *sql.Tx, market *
 	quote := market.QuoteAssetID
 
 	if o.Side == models.Buy {
-		refund := (*o.Price) * remaining
+		var refund float64
+		if o.Type == models.OrderTypeMarket {
+			// For market buy, calculate total quote spent from trades
+			if o.QuoteAmountMax != nil {
+				// Query total quote spent by this order
+				var totalQuoteSpent float64
+				q := `SELECT COALESCE(SUM(quote_amount), 0) FROM trades WHERE taker_order_id = $1`
+				if err := tx.QueryRowContext(ctx, q, o.ID).Scan(&totalQuoteSpent); err != nil {
+					return err
+				}
+				// Refund the difference between locked and spent
+				refund = *o.QuoteAmountMax - totalQuoteSpent
+			} else {
+				refund = 0
+			}
+		} else {
+			refund = (*o.Price) * remaining
+		}
 		if err := s.wallet.UpdateBalances(ctx, tx, o.UserID, quote, +refund, -refund); err != nil { return err }
 	} else {
 		if err := s.wallet.UpdateBalances(ctx, tx, o.UserID, base, +remaining, -remaining); err != nil { return err }
@@ -285,12 +405,14 @@ func (s *OrderService) CancelOrder(ctx context.Context, userID, orderID string) 
 	market, err := s.market.GetByID(ctx, tx, o.MarketID)
 	if err != nil { return err }
 
-	remaining := o.Amount - o.FilledAmount
-	if remaining > 1e-12 {
-		if err := s.refundRemaining(ctx, tx, market, o, remaining, models.Canceled); err != nil {
-			return err
+	if o.Amount != nil {
+		remaining := *o.Amount - o.FilledAmount
+		if remaining > 1e-12 {
+			if err := s.refundRemaining(ctx, tx, market, o, remaining, models.Canceled); err != nil {
+				return err
+			}
 		}
-	} 
+	}
 	if err := s.order.Cancel(ctx, tx, o.ID); err != nil { 
 		return err 
 	}
@@ -311,6 +433,9 @@ func (s *OrderService) AmendOrder(ctx context.Context, userID, orderID string, r
 	if o.Status != models.Open && o.Status != models.PartiallyFilled {
 		return nil, errors.New("cannot amend in this status")
 	}
+	if o.Amount == nil {
+		return nil, errors.New("cannot amend market buy order")
+	}
 	if req.NewAmount < o.FilledAmount {
 		return nil, errors.New("new amount < filled")
 	}
@@ -321,7 +446,7 @@ func (s *OrderService) AmendOrder(ctx context.Context, userID, orderID string, r
 	newPrice := o.Price
 	if req.NewPrice != nil { newPrice = req.NewPrice }
 
-	oldRem := o.Amount - o.FilledAmount
+	oldRem := *o.Amount - o.FilledAmount
 	newRem := req.NewAmount - o.FilledAmount
 	deltaRem := newRem - oldRem
 
@@ -359,7 +484,7 @@ func (s *OrderService) AmendOrder(ctx context.Context, userID, orderID string, r
 	}
 
 	o.Price = newPrice
-	o.Amount = req.NewAmount
+	o.Amount = &req.NewAmount
 
 	if err := tx.Commit(); err != nil { return nil, err }
 	return o, nil

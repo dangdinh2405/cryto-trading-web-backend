@@ -33,17 +33,18 @@ const (
 )
 
 type Order struct {
-	ID           string
-	UserID       string
-	MarketID     string
-	Side         OrderSide
-	Type         OrderType
-	Price        *float64 // nil nếu market
-	Amount       float64
-	FilledAmount float64
-	Status       OrderStatus
-	Fee          float64
-	TIF          TimeInForce
+	ID             string
+	UserID         string
+	MarketID       string
+	Side           OrderSide
+	Type           OrderType
+	Price          *float64 // nil nếu market
+	Amount         *float64 // nil for market buy initially
+	FilledAmount   float64
+	QuoteAmountMax *float64 // for market buy only
+	Status         OrderStatus
+	Fee            float64
+	TIF            TimeInForce
 
 	CreatedAt  time.Time
 	UpdatedAt  time.Time

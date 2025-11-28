@@ -1,9 +1,10 @@
-package route
+package routes
 
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/data"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/controller"
+	"github.com/dangdinh2405/cryto-trading-web-backend/internal/handler"
 )
 
 func AuthRoutes(r *gin.Engine, pg *data.Postgres) {
@@ -21,4 +22,8 @@ func UserRoutes(r *gin.Engine, pg *data.Postgres) {
 	user.GET("/profile", controller.AuthMe())	
 	user.GET("/login-activity", controller.GetLoginActivityHandler(pg.DB))
 	user.GET("/balance", controller.GetUserBalance(pg.DB))
+}
+
+func WebSocketRoutes(r *gin.Engine, h *handler.Handler) {
+	r.GET("/ws/market-prices", h.WSHub.HandleWebSocket)
 }
