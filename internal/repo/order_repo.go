@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 	"database/sql"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/models"
 )
@@ -55,9 +56,10 @@ type OrderBookEntry struct {
 
 // OrderBook represents the full orderbook for a market
 type OrderBook struct {
-	MarketID string           `json:"market_id"`
-	Bids     []OrderBookEntry `json:"bids"` // Buy orders, sorted DESC by price
-	Asks     []OrderBookEntry `json:"asks"` // Sell orders, sorted ASC by price
+	MarketID  string           `json:"market_id"`
+	Bids      []OrderBookEntry `json:"bids"`      // Buy orders, sorted DESC by price
+	Asks      []OrderBookEntry `json:"asks"`      // Sell orders, sorted ASC by price
+	Timestamp time.Time        `json:"timestamp"` // When this snapshot was created
 }
 
 // GetOrderBook retrieves aggregated orderbook for a market
@@ -135,9 +137,10 @@ func (r *OrderRepo) GetOrderBook(ctx context.Context, marketID string, limit int
 	}
 
 	return &OrderBook{
-		MarketID: marketID,
-		Bids:     bids,
-		Asks:     asks,
+		MarketID:  marketID,
+		Bids:      bids,
+		Asks:      asks,
+		Timestamp: time.Now(),
 	}, nil
 }
 
