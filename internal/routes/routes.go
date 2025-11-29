@@ -27,3 +27,12 @@ func UserRoutes(r *gin.Engine, pg *data.Postgres) {
 func WebSocketRoutes(r *gin.Engine, h *handler.Handler) {
 	r.GET("/ws/market-prices", h.WSHub.HandleWebSocket)
 }
+
+func OrderRoutes(r *gin.Engine, h *handler.Handler) {
+	orders := r.Group("/orders")
+	{
+		orders.POST("", h.OrderHandler.Place)
+		orders.DELETE("/:id", h.OrderHandler.Cancel)
+		orders.PUT("/:id", h.OrderHandler.Amend)
+	}
+}
