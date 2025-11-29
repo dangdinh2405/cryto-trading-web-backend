@@ -6,17 +6,23 @@ import (
 )
 
 type Handler struct {
-	OrderHandler *OrderHandler
-	WSHub        *Hub
+	OrderHandler  *OrderHandler
+	WSHub         *Hub
+	OrderbookHub  *OrderbookHub
 }
 
-func NewHandler(orderSvc *service.OrderService, marketRepo *repo.MarketRepo) *Handler {
+func NewHandler(orderSvc *service.OrderService, marketRepo *repo.MarketRepo, orderRepo *repo.OrderRepo) *Handler {
 	hub := NewHub(marketRepo)
 	go hub.Run()
 	go hub.StartCandleBroadcaster()
+
+	orderbookHub := NewOrderbookHub(orderRepo)
+	go orderbookHub.Run()
+	go orderbookHub.StartOrderbookBroadcaster(marketRepo)
 	
 	return &Handler{
 		OrderHandler: NewOrderHandler(orderSvc),
 		WSHub:        hub,
+		OrderbookHub: orderbookHub,
 	}
 }

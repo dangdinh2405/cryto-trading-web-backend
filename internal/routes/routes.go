@@ -26,6 +26,7 @@ func UserRoutes(r *gin.Engine, pg *data.Postgres) {
 
 func WebSocketRoutes(r *gin.Engine, h *handler.Handler) {
 	r.GET("/ws/market-prices", h.WSHub.HandleWebSocket)
+	r.GET("/ws/orderbook", h.OrderbookHub.HandleWebSocket)
 }
 
 func OrderRoutes(r *gin.Engine, h *handler.Handler) {

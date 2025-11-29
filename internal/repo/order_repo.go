@@ -47,6 +47,100 @@ func (r *OrderRepo) Cancel(ctx context.Context, tx *sql.Tx, id string) error {
 	return err
 }
 
+// OrderBookEntry represents a price level in the orderbook
+type OrderBookEntry struct {
+	Price  float64 `json:"price"`
+	Amount float64 `json:"amount"` // Total amount at this price level
+}
+
+// OrderBook represents the full orderbook for a market
+type OrderBook struct {
+	MarketID string           `json:"market_id"`
+	Bids     []OrderBookEntry `json:"bids"` // Buy orders, sorted DESC by price
+	Asks     []OrderBookEntry `json:"asks"` // Sell orders, sorted ASC by price
+}
+
+// GetOrderBook retrieves aggregated orderbook for a market
+// Only includes limit orders with GTC or POST_ONLY TIF
+func (r *OrderRepo) GetOrderBook(ctx context.Context, marketID string, limit int) (*OrderBook, error) {
+	// Get sell orders (asks) - sorted by price ASC (lowest first)
+	asksQuery := `
+		SELECT price, SUM(amount - filled_amount) as total_amount
+		FROM orders
+		WHERE market_id = $1 
+			AND side = 'sell' 
+			AND type = 'limit'
+			AND status IN ('open', 'partially_filled')
+			AND tif IN ('GTC', 'POST_ONLY')
+			AND price IS NOT NULL
+		GROUP BY price
+		ORDER BY price ASC
+		LIMIT $2
+	`
+
+	// Get buy orders (bids) - sorted by price DESC (highest first)
+	bidsQuery := `
+		SELECT price, SUM(amount - filled_amount) as total_amount
+		FROM orders
+		WHERE market_id = $1 
+			AND side = 'buy' 
+			AND type = 'limit'
+			AND status IN ('open', 'partially_filled')
+			AND tif IN ('GTC', 'POST_ONLY')
+			AND price IS NOT NULL
+		GROUP BY price
+		ORDER BY price DESC
+		LIMIT $2
+	`
+
+	var asks, bids []OrderBookEntry
+	// Initialize as empty slices to return [] instead of null in JSON
+	asks = []OrderBookEntry{}
+	bids = []OrderBookEntry{}
+
+	// Fetch asks
+	asksRows, err := r.db.QueryContext(ctx, asksQuery, marketID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer asksRows.Close()
+
+	for asksRows.Next() {
+		var entry OrderBookEntry
+		if err := asksRows.Scan(&entry.Price, &entry.Amount); err != nil {
+			return nil, err
+		}
+		asks = append(asks, entry)
+	}
+	if err := asksRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Fetch bids
+	bidsRows, err := r.db.QueryContext(ctx, bidsQuery, marketID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer bidsRows.Close()
+
+	for bidsRows.Next() {
+		var entry OrderBookEntry
+		if err := bidsRows.Scan(&entry.Price, &entry.Amount); err != nil {
+			return nil, err
+		}
+		bids = append(bids, entry)
+	}
+	if err := bidsRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &OrderBook{
+		MarketID: marketID,
+		Bids:     bids,
+		Asks:     asks,
+	}, nil
+}
+
 // Select makers for matching (locked + skip locked)
 func (r *OrderRepo) SelectMakersForUpdate(ctx context.Context, tx *sql.Tx, marketID string, takerSide models.OrderSide, takerType models.OrderType, takerPrice *float64, limit int) ([]*models.Order, error) {
 	var q string

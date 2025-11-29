@@ -50,7 +50,7 @@ func main() {
 
 	orderService := service.NewOrderService(db.DB, marketRepo, orderRepo, tradeRepo, walletRepo)
 
-	handle := handler.NewHandler(orderService, marketRepo)
+	handle := handler.NewHandler(orderService, marketRepo, orderRepo)
 
 	routes.AuthRoutes(r, db)
 	routes.WebSocketRoutes(r, handle)
