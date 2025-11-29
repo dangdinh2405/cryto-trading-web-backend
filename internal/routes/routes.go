@@ -29,6 +29,14 @@ func WebSocketRoutes(r *gin.Engine, h *handler.Handler) {
 	r.GET("/ws/orderbook", h.OrderbookHub.HandleWebSocket)
 }
 
+func MarketRoutes(r *gin.Engine, h *handler.Handler) {
+	market := r.Group("/market")
+	{
+		market.GET("/list", h.MarketHandler.GetMarkets)
+		market.GET("/candles", h.MarketHandler.GetCandles)
+	}
+}
+
 func OrderRoutes(r *gin.Engine, h *handler.Handler) {
 	orders := r.Group("/orders")
 	{

@@ -7,6 +7,7 @@ import (
 
 type Handler struct {
 	OrderHandler  *OrderHandler
+	MarketHandler *MarketHandler
 	WSHub         *Hub
 	OrderbookHub  *OrderbookHub
 }
@@ -21,8 +22,9 @@ func NewHandler(orderSvc *service.OrderService, marketRepo *repo.MarketRepo, ord
 	go orderbookHub.StartOrderbookBroadcaster(marketRepo)
 	
 	return &Handler{
-		OrderHandler: NewOrderHandler(orderSvc),
-		WSHub:        hub,
-		OrderbookHub: orderbookHub,
+		OrderHandler:  NewOrderHandler(orderSvc),
+		MarketHandler: NewMarketHandler(marketRepo),
+		WSHub:         hub,
+		OrderbookHub:  orderbookHub,
 	}
 }

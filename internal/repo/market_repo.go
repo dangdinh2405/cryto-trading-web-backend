@@ -23,7 +23,7 @@ func (r *MarketRepo) GetByID(ctx context.Context, tx *sql.Tx, id string) (*model
 
 // GetAllActiveMarkets retrieves all active markets
 func (r *MarketRepo) GetAllActiveMarkets(ctx context.Context) ([]models.Market, error) {
-	q := `SELECT id, symbol, base_asset_id, quote_asset_id FROM markets WHERE is_active = true`
+	q := `SELECT id, symbol, base_asset_id, quote_asset_id, min_price, max_price, tick_size, min_notional FROM markets WHERE is_active = true`
 	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -33,7 +33,7 @@ func (r *MarketRepo) GetAllActiveMarkets(ctx context.Context) ([]models.Market, 
 	var markets []models.Market
 	for rows.Next() {
 		var m models.Market
-		if err := rows.Scan(&m.ID, &m.Symbol, &m.BaseAssetID, &m.QuoteAssetID); err != nil {
+		if err := rows.Scan(&m.ID, &m.Symbol, &m.BaseAssetID, &m.QuoteAssetID, &m.MinPrice, &m.MaxPrice, &m.TickSize, &m.MinNotional); err != nil {
 			return nil, err
 		}
 		markets = append(markets, m)
@@ -104,6 +104,51 @@ func (r *MarketRepo) SaveOHLCV(ctx context.Context, candle *models.OHLCV) error 
 		candle.Volume,
 	)
 	return err
+}
+
+// GetCandles retrieves historical candles from ohlcv_1m table
+func (r *MarketRepo) GetCandles(ctx context.Context, symbol string, interval string, limit int, endTime *time.Time) ([]models.OHLCV, error) {
+	// For now, we only support 1m interval since we only have ohlcv_1m table
+	// You can extend this to support other intervals by creating additional tables
+	
+	var q string
+	var args []interface{}
+	
+	if endTime != nil {
+		q = `
+			SELECT symbol, open_time, close_time, open, high, low, close, volume
+			FROM ohlcv_1m
+			WHERE symbol = $1 AND open_time < $2
+			ORDER BY open_time DESC
+			LIMIT $3
+		`
+		args = []interface{}{symbol, *endTime, limit}
+	} else {
+		q = `
+			SELECT symbol, open_time, close_time, open, high, low, close, volume
+			FROM ohlcv_1m
+			WHERE symbol = $1
+			ORDER BY open_time DESC
+			LIMIT $2
+		`
+		args = []interface{}{symbol, limit}
+	}
+
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var candles []models.OHLCV
+	for rows.Next() {
+		var c models.OHLCV
+		if err := rows.Scan(&c.Symbol, &c.OpenTime, &c.CloseTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume); err != nil {
+			return nil, err
+		}
+		candles = append(candles, c)
+	}
+	return candles, rows.Err()
 }
 
 // Trade represents a trade for candle aggregation

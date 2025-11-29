@@ -54,6 +54,7 @@ func main() {
 
 	routes.AuthRoutes(r, db)
 	routes.WebSocketRoutes(r, handle)
+	routes.MarketRoutes(r, handle)
 
 	r.Use(middleware.RequireAuth(db.DB))
 	
