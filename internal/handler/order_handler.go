@@ -35,6 +35,25 @@ func (h *OrderHandler) Place(c *gin.Context) {
 	})
 }
 
+func (h *OrderHandler) List(c *gin.Context) {
+	user, err := GetCurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get optional status filter from query param
+	status := c.Query("status")
+
+	orders, err := h.svc.ListOrders(c.Request.Context(), user.ID.String(), status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"orders": orders})
+}
+
 func (h *OrderHandler) Cancel(c *gin.Context) {
 	user, err := GetCurrentUser(c)
 	if err != nil {

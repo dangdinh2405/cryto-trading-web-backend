@@ -48,6 +48,47 @@ func (r *OrderRepo) Cancel(ctx context.Context, tx *sql.Tx, id string) error {
 	return err
 }
 
+func (r *OrderRepo) GetByUserID(ctx context.Context, userID string, status string) ([]*models.Order, error) {
+	var q string
+	var args []interface{}
+
+	if status != "" {
+		q = `SELECT id, user_id, market_id, side, type, price, amount, filled_amount, quote_amount_max, status, fee, tif, created_at, updated_at, canceled_at
+			 FROM orders 
+			 WHERE user_id = $1 AND status = $2
+			 ORDER BY created_at DESC
+			 LIMIT 100`
+		args = []interface{}{userID, status}
+	} else {
+		q = `SELECT id, user_id, market_id, side, type, price, amount, filled_amount, quote_amount_max, status, fee, tif, created_at, updated_at, canceled_at
+			 FROM orders 
+			 WHERE user_id = $1
+			 ORDER BY created_at DESC
+			 LIMIT 100`
+		args = []interface{}{userID}
+	}
+
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []*models.Order
+	for rows.Next() {
+		var o models.Order
+		if err := rows.Scan(&o.ID, &o.UserID, &o.MarketID, &o.Side, &o.Type, &o.Price,
+			&o.Amount, &o.FilledAmount, &o.QuoteAmountMax, &o.Status, &o.Fee, &o.TIF,
+			&o.CreatedAt, &o.UpdatedAt, &o.CanceledAt); err != nil {
+			return nil, err
+		}
+		orders = append(orders, &o)
+	}
+
+	return orders, rows.Err()
+}
+
+
 // OrderBookEntry represents a price level in the orderbook
 type OrderBookEntry struct {
 	Price  float64 `json:"price"`

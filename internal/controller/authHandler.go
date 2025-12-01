@@ -261,7 +261,7 @@ func SignIn(db *sql.DB) gin.HandlerFunc {
 		}
 
 		// 7. Set cookie refreshToken
-		c.SetSameSite(http.SameSiteNoneMode)
+		// c.SetSameSite(http.SameSiteNoneMode)
 		secure := false // đổi true khi dùng HTTPS
 
 		c.SetCookie(
@@ -279,6 +279,7 @@ func SignIn(db *sql.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "User " + displayName + " đã logged in!",
 			"accessToken": accessToken,
+			"expiresIn":   int(accessTTL.Seconds()),
 		})
 	}
 }
@@ -307,7 +308,7 @@ func SignOut(db *sql.DB) gin.HandlerFunc {
 			_ = err
 
 			// Xoá cookie
-			c.SetSameSite(http.SameSiteNoneMode)
+			// c.SetSameSite(http.SameSiteNoneMode)
 			secure := false // dùng HTTPS thì đổi true
 
 			c.SetCookie(
@@ -405,6 +406,7 @@ func RefreshToken(db *sql.DB) gin.HandlerFunc {
 		// 7) Trả về access token mới
 		c.JSON(http.StatusOK, gin.H{
 			"accessToken": accessToken,
+			"expiresIn":   int(accessTTL.Seconds()),
 		})
 	}
 }

@@ -40,6 +40,7 @@ func MarketRoutes(r *gin.Engine, h *handler.Handler) {
 func OrderRoutes(r *gin.Engine, h *handler.Handler) {
 	orders := r.Group("/orders")
 	{
+		orders.GET("", h.OrderHandler.List)
 		orders.POST("", h.OrderHandler.Place)
 		orders.DELETE("/:id", h.OrderHandler.Cancel)
 		orders.PUT("/:id", h.OrderHandler.Amend)

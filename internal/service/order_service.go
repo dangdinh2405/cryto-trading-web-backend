@@ -26,6 +26,11 @@ func NewOrderService(db *sql.DB, mr *repo.MarketRepo, or *repo.OrderRepo, tr *re
 	}
 }
 
+// ---------------- LIST ORDERS ----------------
+func (s *OrderService) ListOrders(ctx context.Context, userID string, status string) ([]*models.Order, error) {
+	return s.order.GetByUserID(ctx, userID, status)
+}
+
 // ---------------- PLACE ORDER ----------------
 func (s *OrderService) PlaceOrder(ctx context.Context, userID string, req PlaceOrderReq) (*models.Order, []*models.Trade, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})

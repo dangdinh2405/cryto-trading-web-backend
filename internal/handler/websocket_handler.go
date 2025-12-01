@@ -95,6 +95,21 @@ func (ct *CandleTracker) GetCurrentCandles() []models.OHLCV {
 	return candles
 }
 
+// HasCandle checks if a candle exists for symbol
+func (ct *CandleTracker) HasCandle(symbol string) bool {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	_, exists := ct.candles[symbol]
+	return exists
+}
+
+// GetCandle returns candle for symbol (or nil)
+func (ct *CandleTracker) GetCandle(symbol string) *models.OHLCV {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return ct.candles[symbol]
+}
+
 // ResetCandle resets candle for a symbol (start new minute)
 func (ct *CandleTracker) ResetCandle(symbol string, newMinute time.Time, lastClose float64) {
 	ct.mu.Lock()
@@ -113,26 +128,29 @@ func (ct *CandleTracker) ResetCandle(symbol string, newMinute time.Time, lastClo
 }
 
 type Hub struct {
-	clients       map[*Client]bool
-	broadcast     chan []models.OHLCV
-	register      chan *Client
-	unregister    chan *Client
-	mu            sync.RWMutex
-	marketRepo    *repo.MarketRepo
-	candleTracker *CandleTracker
-	currentMinute time.Time
+	clients           map[*Client]bool
+	broadcast         chan []models.OHLCV
+	register          chan *Client
+	unregister        chan *Client
+	mu                sync.RWMutex
+	marketRepo        *repo.MarketRepo
+	candleTracker     *CandleTracker
+	currentMinute     time.Time
+	subscribedSymbols map[string]bool // track all subscribed symbols
+	symbolsLock       sync.RWMutex    // protect subscribedSymbols
 }
 
 func NewHub(marketRepo *repo.MarketRepo) *Hub {
 	now := time.Now()
 	return &Hub{
-		clients:       make(map[*Client]bool),
-		broadcast:     make(chan []models.OHLCV, 256),
-		register:      make(chan *Client),
-		unregister:    make(chan *Client),
-		marketRepo:    marketRepo,
-		candleTracker: NewCandleTracker(),
-		currentMinute: now.Truncate(time.Minute),
+		clients:           make(map[*Client]bool),
+		broadcast:         make(chan []models.OHLCV, 256),
+		register:          make(chan *Client),
+		unregister:        make(chan *Client),
+		marketRepo:        marketRepo,
+		candleTracker:     NewCandleTracker(),
+		currentMinute:     now.Truncate(time.Minute),
+		subscribedSymbols: make(map[string]bool),
 	}
 }
 
@@ -270,10 +288,32 @@ func (c *Client) handleMessage(msg WSMessage) {
 	c.symbolsLock.Lock()
 	defer c.symbolsLock.Unlock()
 
+	ctx := context.Background()
+
 	switch msg.Type {
 	case "subscribe":
 		for _, symbol := range msg.Symbols {
+			// Validate symbol BEFORE subscribing
+			exists, err := c.hub.marketRepo.ValidateSymbol(ctx, symbol)
+			if err != nil {
+				log.Printf("Error validating symbol %s: %v", symbol, err)
+				continue
+			}
+			if !exists {
+				log.Printf("Rejected subscription to invalid symbol: %s (not in markets table)", symbol)
+				continue
+			}
+
+			// Symbol is valid, add to subscriptions
 			c.symbols[symbol] = true
+			
+			// Track globally subscribed symbols and initialize candle if new
+			c.hub.symbolsLock.Lock()
+			if !c.hub.subscribedSymbols[symbol] {
+				c.hub.subscribedSymbols[symbol] = true
+				go c.hub.InitializeSymbolCandle(ctx, symbol)
+			}
+			c.hub.symbolsLock.Unlock()
 		}
 		log.Printf("Client subscribed to: %v (total: %d)", msg.Symbols, len(c.symbols))
 
@@ -286,6 +326,44 @@ func (c *Client) handleMessage(msg WSMessage) {
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}
+}
+
+// InitializeSymbolCandle initializes a candle for a symbol from database
+// Note: Assumes symbol has already been validated before calling this method
+func (h *Hub) InitializeSymbolCandle(ctx context.Context, symbol string) error {
+	// Check if candle already exists
+	if h.candleTracker.HasCandle(symbol) {
+		return nil
+	}
+
+	log.Printf("[InitializeSymbolCandle] Initializing candle for %s", symbol)
+
+	// Try to get latest candle from DB
+	candles, err := h.marketRepo.GetCandles(ctx, symbol, "1m", 1, nil)
+	if err == nil && len(candles) > 0 {
+		lastCandle := candles[0]
+		h.candleTracker.ResetCandle(symbol, h.currentMinute, lastCandle.Close)
+		log.Printf("[InitializeSymbolCandle] Initialized %s with last close price: %.2f", symbol, lastCandle.Close)
+		return nil
+	}
+
+	// Fallback: try to get last trade price
+	since := time.Now().Add(-24 * time.Hour)
+	trades, err := h.marketRepo.GetLatestTrades(ctx, since)
+	if err == nil {
+		for i := len(trades) - 1; i >= 0; i-- {
+			if trades[i].Symbol == symbol {
+				h.candleTracker.ResetCandle(symbol, h.currentMinute, trades[i].Price)
+				log.Printf("[InitializeSymbolCandle] Initialized %s with last trade price: %.2f", symbol, trades[i].Price)
+				return nil
+			}
+		}
+	}
+
+	// No data available, initialize with 0
+	h.candleTracker.ResetCandle(symbol, h.currentMinute, 0)
+	log.Printf("[InitializeSymbolCandle] Initialized %s with default price: 0", symbol)
+	return nil
 }
 
 func (h *Hub) HandleWebSocket(c *gin.Context) {
@@ -327,6 +405,18 @@ func (h *Hub) StartCandleBroadcaster() {
 			// Save all completed candles from previous minute
 			oldCandles := h.candleTracker.GetCurrentCandles()
 			for _, candle := range oldCandles {
+				// Validate symbol before saving
+				exists, err := h.marketRepo.ValidateSymbol(ctx, candle.Symbol)
+				if err != nil {
+					log.Printf("Error validating symbol %s: %v", candle.Symbol, err)
+					continue
+				}
+				if !exists {
+					log.Printf("Skipping save for invalid symbol: %s", candle.Symbol)
+					continue
+				}
+
+				// Save valid candles
 				if err := h.marketRepo.SaveOHLCV(ctx, &candle); err != nil {
 					log.Printf("Error saving candle for %s: %v", candle.Symbol, err)
 				} else {
@@ -338,6 +428,16 @@ func (h *Hub) StartCandleBroadcaster() {
 				h.candleTracker.ResetCandle(candle.Symbol, newMinute, candle.Close)
 			}
 
+			// Ensure all subscribed symbols have candles for the new minute
+			h.symbolsLock.RLock()
+			for symbol := range h.subscribedSymbols {
+				if !h.candleTracker.HasCandle(symbol) {
+					// Initialize candle for this symbol
+					go h.InitializeSymbolCandle(ctx, symbol)
+				}
+			}
+			h.symbolsLock.RUnlock()
+
 			h.currentMinute = newMinute
 		}
 
@@ -345,17 +445,16 @@ func (h *Hub) StartCandleBroadcaster() {
 		trades, err := h.marketRepo.GetLatestTrades(ctx, h.candleTracker.lastTradeCheck)
 		if err != nil {
 			log.Printf("Error fetching trades: %v", err)
-			continue
-		}
-
-		// Update candles with new trades
-		for _, trade := range trades {
-			h.candleTracker.UpdateWithTrade(trade, h.currentMinute)
+		} else {
+			// Update candles with new trades
+			for _, trade := range trades {
+				h.candleTracker.UpdateWithTrade(trade, h.currentMinute)
+			}
 		}
 
 		h.candleTracker.lastTradeCheck = now
 
-		// Broadcast current candle state
+		// Always broadcast current candle state (even if no trades)
 		candles := h.candleTracker.GetCurrentCandles()
 		if len(candles) > 0 {
 			h.broadcast <- candles

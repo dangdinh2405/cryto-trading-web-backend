@@ -41,6 +41,17 @@ func (r *MarketRepo) GetAllActiveMarkets(ctx context.Context) ([]models.Market, 
 	return markets, rows.Err()
 }
 
+// ValidateSymbol checks if a symbol exists in the markets table
+func (r *MarketRepo) ValidateSymbol(ctx context.Context, symbol string) (bool, error) {
+	q := `SELECT EXISTS(SELECT 1 FROM markets WHERE symbol = $1 AND is_active = true)`
+	var exists bool
+	err := r.db.QueryRowContext(ctx, q, symbol).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 // GetLatestTrades gets recent trades for candle aggregation
 func (r *MarketRepo) GetLatestTrades(ctx context.Context, since time.Time) ([]Trade, error) {
 	q := `
