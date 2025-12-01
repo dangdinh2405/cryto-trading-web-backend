@@ -117,11 +117,43 @@ func (r *MarketRepo) SaveOHLCV(ctx context.Context, candle *models.OHLCV) error 
 	return err
 }
 
-// GetCandles retrieves historical candles from ohlcv_1m table
+// GetCandles retrieves historical candles and aggregates based on interval
 func (r *MarketRepo) GetCandles(ctx context.Context, symbol string, interval string, limit int, endTime *time.Time) ([]models.OHLCV, error) {
-	// For now, we only support 1m interval since we only have ohlcv_1m table
-	// You can extend this to support other intervals by creating additional tables
-	
+	// Map interval to minutes
+	intervalMap := map[string]int{
+		"1m":  1,
+		"5m":  5,
+		"15m": 15,
+		"1h":  60,
+		"4h":  240,
+		"1D":  1440,
+	}
+
+	intervalMinutes, ok := intervalMap[interval]
+	if !ok {
+		// Default to 1m if invalid interval
+		intervalMinutes = 1
+	}
+
+	// If 1m requested, query directly
+	if intervalMinutes == 1 {
+		return r.get1mCandles(ctx, symbol, limit, endTime)
+	}
+
+	// For other intervals, fetch more 1m candles and aggregate
+	// We need (limit * intervalMinutes) 1m candles to create 'limit' aggregated candles
+	requiredCandles := limit * intervalMinutes
+	candles1m, err := r.get1mCandles(ctx, symbol, requiredCandles, endTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// Aggregate candles
+	return r.aggregateCandles(candles1m, intervalMinutes, limit), nil
+}
+
+// get1mCandles fetches 1-minute candles from database
+func (r *MarketRepo) get1mCandles(ctx context.Context, symbol string, limit int, endTime *time.Time) ([]models.OHLCV, error) {
 	var q string
 	var args []interface{}
 	
@@ -160,6 +192,72 @@ func (r *MarketRepo) GetCandles(ctx context.Context, symbol string, interval str
 		candles = append(candles, c)
 	}
 	return candles, rows.Err()
+}
+
+// aggregateCandles aggregates 1m candles into larger intervals
+func (r *MarketRepo) aggregateCandles(candles1m []models.OHLCV, intervalMinutes int, limit int) []models.OHLCV {
+	if len(candles1m) == 0 {
+		return []models.OHLCV{}
+	}
+
+	// Reverse to process in chronological order (oldest first)
+	for i, j := 0, len(candles1m)-1; i < j; i, j = i+1, j-1 {
+		candles1m[i], candles1m[j] = candles1m[j], candles1m[i]
+	}
+
+	var aggregated []models.OHLCV
+	intervalDuration := time.Duration(intervalMinutes) * time.Minute
+
+	for i := 0; i < len(candles1m); {
+		// Start of this interval (truncate to interval boundary)
+		startTime := candles1m[i].OpenTime.Truncate(intervalDuration)
+		endTime := startTime.Add(intervalDuration)
+
+		// Aggregate all 1m candles in this interval
+		var bucket []models.OHLCV
+		for i < len(candles1m) && candles1m[i].OpenTime.Before(endTime) {
+			bucket = append(bucket, candles1m[i])
+			i++
+		}
+
+		if len(bucket) > 0 {
+			agg := models.OHLCV{
+				Symbol:    bucket[0].Symbol,
+				OpenTime:  startTime,
+				CloseTime: endTime,
+				Open:      bucket[0].Open,
+				Close:     bucket[len(bucket)-1].Close,
+				High:      bucket[0].High,
+				Low:       bucket[0].Low,
+				Volume:    0,
+			}
+
+			// Calculate high, low, volume
+			for _, c := range bucket {
+				if c.High > agg.High {
+					agg.High = c.High
+				}
+				if c.Low < agg.Low {
+					agg.Low = c.Low
+				}
+				agg.Volume += c.Volume
+			}
+
+			aggregated = append(aggregated, agg)
+
+			// Stop if we have enough candles
+			if len(aggregated) >= limit {
+				break
+			}
+		}
+	}
+
+	// Reverse back to descending order (newest first)
+	for i, j := 0, len(aggregated)-1; i < j; i, j = i+1, j-1 {
+		aggregated[i], aggregated[j] = aggregated[j], aggregated[i]
+	}
+
+	return aggregated
 }
 
 // Trade represents a trade for candle aggregation
