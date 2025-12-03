@@ -33,20 +33,22 @@ const (
 )
 
 type Order struct {
-	ID             string
-	UserID         string
-	MarketID       string
-	Side           OrderSide
-	Type           OrderType
-	Price          *float64 // nil nếu market
-	Amount         *float64 // nil for market buy initially
-	FilledAmount   float64
-	QuoteAmountMax *float64 // for market buy only
-	Status         OrderStatus
-	Fee            float64
-	TIF            TimeInForce
+	ID             string      `json:"id"`
+	UserID         string      `json:"userId"`
+	MarketID       string      `json:"marketId"`
+	Symbol         string      `json:"symbol"` // From markets table JOIN
+	Side           OrderSide   `json:"side"`
+	Type           OrderType   `json:"type"`
+	Price          *float64    `json:"price"`          // nil nếu market
+	Amount         *float64    `json:"amount"`         // nil for market buy initially
+	FilledAmount   float64     `json:"filled"`
+	QuoteAmountMax *float64    `json:"quoteAmountMax"` // for market buy only
+	Status         OrderStatus `json:"status"`
+	Fee            float64     `json:"fee"`
+	TIF            TimeInForce `json:"tif"`
 
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	CanceledAt *time.Time
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	CanceledAt *time.Time `json:"canceledAt,omitempty"`
 }
+

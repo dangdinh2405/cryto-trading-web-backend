@@ -53,16 +53,18 @@ func (r *OrderRepo) GetByUserID(ctx context.Context, userID string, status strin
 	var args []interface{}
 
 	if status != "" {
-		q = `SELECT id, user_id, market_id, side, type, price, amount, filled_amount, quote_amount_max, status, fee, tif, created_at, updated_at, canceled_at
-			 FROM orders 
-			 WHERE user_id = $1 AND status = $2
+		q = `SELECT o.id, o.user_id, o.market_id, m.symbol, o.side, o.type, o.price, o.amount, o.filled_amount, o.quote_amount_max, o.status, o.fee, o.tif, o.created_at, o.updated_at, o.canceled_at
+			FROM orders o
+			JOIN markets m ON o.market_id = m.id
+			WHERE o.user_id = $1 AND o.status = $2
 			 ORDER BY created_at DESC
 			 LIMIT 100`
 		args = []interface{}{userID, status}
 	} else {
-		q = `SELECT id, user_id, market_id, side, type, price, amount, filled_amount, quote_amount_max, status, fee, tif, created_at, updated_at, canceled_at
-			 FROM orders 
-			 WHERE user_id = $1
+		q = `SELECT o.id, o.user_id, o.market_id, m.symbol, o.side, o.type, o.price, o.amount, o.filled_amount, o.quote_amount_max, o.status, o.fee, o.tif, o.created_at, o.updated_at, o.canceled_at
+			 FROM orders o
+			 JOIN markets m ON o.market_id = m.id
+			 WHERE o.user_id = $1
 			 ORDER BY created_at DESC
 			 LIMIT 100`
 		args = []interface{}{userID}
@@ -77,7 +79,7 @@ func (r *OrderRepo) GetByUserID(ctx context.Context, userID string, status strin
 	var orders []*models.Order
 	for rows.Next() {
 		var o models.Order
-		if err := rows.Scan(&o.ID, &o.UserID, &o.MarketID, &o.Side, &o.Type, &o.Price,
+		if err := rows.Scan(&o.ID, &o.UserID, &o.MarketID, &o.Symbol, &o.Side, &o.Type, &o.Price,
 			&o.Amount, &o.FilledAmount, &o.QuoteAmountMax, &o.Status, &o.Fee, &o.TIF,
 			&o.CreatedAt, &o.UpdatedAt, &o.CanceledAt); err != nil {
 			return nil, err

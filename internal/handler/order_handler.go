@@ -51,7 +51,8 @@ func (h *OrderHandler) List(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"orders": orders})
+	// Return array directly for frontend consistency
+	c.JSON(http.StatusOK, orders)
 }
 
 func (h *OrderHandler) Cancel(c *gin.Context) {

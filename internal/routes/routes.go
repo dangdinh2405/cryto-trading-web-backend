@@ -22,6 +22,7 @@ func UserRoutes(r *gin.Engine, pg *data.Postgres) {
 	user.GET("/profile", controller.AuthMe())	
 	user.GET("/login-activity", controller.GetLoginActivityHandler(pg.DB))
 	user.GET("/balance", controller.GetUserBalance(pg.DB))
+	user.GET("/trades", controller.GetUserTradesHandler(pg.DB))
 }
 
 func WebSocketRoutes(r *gin.Engine, h *handler.Handler) {
