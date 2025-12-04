@@ -16,12 +16,13 @@ type OrderService struct {
 	order   *repo.OrderRepo
 	trade   *repo.TradeRepo
 	wallet  *repo.WalletRepo
+	cache   *CacheService // Redis cache for invalidation
 	feeRate float64
 }
 
-func NewOrderService(db *sql.DB, mr *repo.MarketRepo, or *repo.OrderRepo, tr *repo.TradeRepo, wr *repo.WalletRepo) *OrderService {
+func NewOrderService(db *sql.DB, mr *repo.MarketRepo, or *repo.OrderRepo, tr *repo.TradeRepo, wr *repo.WalletRepo, cs *CacheService) *OrderService {
 	return &OrderService{
-		db: db, market: mr, order: or, trade: tr, wallet: wr,
+		db: db, market: mr, order: or, trade: tr, wallet: wr, cache: cs,
 		feeRate: 0.001,
 	}
 }
@@ -103,6 +104,12 @@ func (s *OrderService) PlaceOrder(ctx context.Context, userID string, req PlaceO
 	}
 
 	if err := tx.Commit(); err != nil { return nil, nil, err }
+	
+	// Invalidate orderbook cache after successful order placement
+	if s.cache != nil {
+		go s.cache.InvalidateOrderBook(context.Background(), req.MarketID)
+	}
+	
 	return taker, trades, nil
 }
 
@@ -422,7 +429,16 @@ func (s *OrderService) CancelOrder(ctx context.Context, userID, orderID string) 
 		return err 
 	}
 	
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	
+	// Invalidate orderbook cache after successful cancellation
+	if s.cache != nil {
+		go s.cache.InvalidateOrderBook(context.Background(), o.MarketID)
+	}
+	
+	return nil
 }
 
 // ---------------- AMEND ORDER ----------------

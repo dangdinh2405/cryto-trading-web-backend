@@ -12,12 +12,12 @@ type Handler struct {
 	OrderbookHub  *OrderbookHub
 }
 
-func NewHandler(orderSvc *service.OrderService, marketRepo *repo.MarketRepo, orderRepo *repo.OrderRepo) *Handler {
-	hub := NewHub(marketRepo)
+func NewHandler(orderSvc *service.OrderService, marketRepo *repo.MarketRepo, orderRepo *repo.OrderRepo, cache interface{}) *Handler {
+	hub := NewHub(marketRepo, cache)
 	go hub.Run()
 	go hub.StartCandleBroadcaster()
 
-	orderbookHub := NewOrderbookHub(orderRepo)
+	orderbookHub := NewOrderbookHub(orderRepo, cache)
 	go orderbookHub.Run()
 	go orderbookHub.StartOrderbookBroadcaster(marketRepo)
 	

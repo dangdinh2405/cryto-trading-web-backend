@@ -15,7 +15,6 @@ import (
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/handler"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/service"
 	"github.com/dangdinh2405/cryto-trading-web-backend/internal/middleware"
-	
 )
 
 func main() {
@@ -38,20 +37,45 @@ func main() {
 		port = "10000"
 	}
 
+	// Initialize PostgreSQL
 	db, err := data.NewPostgres()
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
 
+	// Initialize Redis
+	redis, err := data.NewRedis()
+	if err != nil {
+		log.Printf("Warning: Redis connection failed: %v. Proceeding without cache.", err)
+		redis = nil // Continue without Redis
+	}
+	if redis != nil {
+		defer redis.Close()
+	}
+
+	// Create cache service
+	var cacheService *service.CacheService
+	if redis != nil {
+		cacheService = service.NewCacheService(redis.Client)
+		log.Println("Cache service initialized with Redis")
+	} else {
+		log.Println("Cache service disabled (Redis unavailable)")
+	}
+
+	// Initialize repositories
 	marketRepo := repo.NewMarketRepo(db.DB)
 	orderRepo  := repo.NewOrderRepo(db.DB)
 	tradeRepo  := repo.NewTradeRepo(db.DB)
 	walletRepo := repo.NewWalletRepo(db.DB)
 
-	orderService := service.NewOrderService(db.DB, marketRepo, orderRepo, tradeRepo, walletRepo)
+	// Initialize services with cache
+	orderService := service.NewOrderService(db.DB, marketRepo, orderRepo, tradeRepo, walletRepo, cacheService)
 
-	handle := handler.NewHandler(orderService, marketRepo, orderRepo)
+	// Initialize handlers with cache
+	handle := handler.NewHandler(orderService, marketRepo, orderRepo, cacheService)
 
+	// Setup routes
 	routes.AuthRoutes(r, db)
 	routes.WebSocketRoutes(r, handle)
 	routes.MarketRoutes(r, handle)
@@ -60,8 +84,6 @@ func main() {
 	
 	routes.UserRoutes(r, db)
 	routes.OrderRoutes(r, handle)
-
-	defer db.Close()
 
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal(err)

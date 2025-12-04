@@ -106,8 +106,23 @@ type OrderBook struct {
 }
 
 // GetOrderBook retrieves aggregated orderbook for a market
-// Only includes limit orders with GTC or POST_ONLY TIF
-func (r *OrderRepo) GetOrderBook(ctx context.Context, marketID string, limit int) (*OrderBook, error) {
+// Uses cache-aside pattern if cache service is provided
+func (r *OrderRepo) GetOrderBook(ctx context.Context, marketID string, limit int, cache interface{}) (*OrderBook, error) {
+	// Try cache first if provided
+	type cacheService interface {
+		GetOrderBook(ctx context.Context, marketID string) (*OrderBook, error)
+		SetOrderBook(ctx context.Context, marketID string, orderbook *OrderBook, ttl time.Duration) error
+	}
+	
+	if cs, ok := cache.(cacheService); ok && cs != nil {
+		cached, err := cs.GetOrderBook(ctx, marketID)
+		if err == nil && cached != nil {
+			// Cache hit
+			return cached, nil
+		}
+		// Cache miss or error, continue to database
+	}
+	
 	// Get sell orders (asks) - sorted by price ASC (lowest first)
 	asksQuery := `
 		SELECT price, SUM(amount - filled_amount) as total_amount
@@ -179,12 +194,20 @@ func (r *OrderRepo) GetOrderBook(ctx context.Context, marketID string, limit int
 		return nil, err
 	}
 
-	return &OrderBook{
+	orderbook := &OrderBook{
 		MarketID:  marketID,
 		Bids:      bids,
 		Asks:      asks,
 		Timestamp: time.Now(),
-	}, nil
+	}
+	
+	// Store in cache if cache service provided
+	if cs, ok := cache.(cacheService); ok && cs != nil {
+		// Cache for 2 seconds (async, don't block on error)
+		go cs.SetOrderBook(context.Background(), marketID, orderbook, 2*time.Second)
+	}
+	
+	return orderbook, nil
 }
 
 // Select makers for matching (locked + skip locked)

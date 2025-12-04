@@ -36,16 +36,18 @@ type OrderbookHub struct {
 	unregister chan *OrderbookClient
 	mu         sync.RWMutex
 	orderRepo  *repo.OrderRepo
+	cache      interface{} // Cache service (optional)
 }
 
 // NewOrderbookHub creates a new orderbook hub
-func NewOrderbookHub(orderRepo *repo.OrderRepo) *OrderbookHub {
+func NewOrderbookHub(orderRepo *repo.OrderRepo, cache interface{}) *OrderbookHub {
 	return &OrderbookHub{
 		clients:    make(map[*OrderbookClient]bool),
 		broadcast:  make(chan map[string]*repo.OrderBook, 256),
 		register:   make(chan *OrderbookClient),
 		unregister: make(chan *OrderbookClient),
 		orderRepo:  orderRepo,
+		cache:      cache,
 	}
 }
 
@@ -217,7 +219,7 @@ func (c *OrderbookClient) sendImmediateOrderbook(marketIDs []string) {
 	orderbooks := make(map[string]*repo.OrderBook)
 	
 	for _, marketID := range marketIDs {
-		orderbook, err := c.hub.orderRepo.GetOrderBook(ctx, marketID, 20)
+		orderbook, err := c.hub.orderRepo.GetOrderBook(ctx, marketID, 20, c.hub.cache)
 		if err != nil {
 			log.Printf("Error fetching immediate orderbook for market %s: %v", marketID, err)
 			continue
@@ -285,7 +287,7 @@ func (h *OrderbookHub) StartOrderbookBroadcaster(marketRepo *repo.MarketRepo) {
 		// Fetch orderbook for each market
 		orderbooks := make(map[string]*repo.OrderBook)
 		for _, market := range markets {
-			orderbook, err := h.orderRepo.GetOrderBook(ctx, market.ID, 20) // Top 20 levels
+			orderbook, err := h.orderRepo.GetOrderBook(ctx, market.ID, 20, h.cache) // Top 20 levels
 			if err != nil {
 				log.Printf("Error fetching orderbook for market %s: %v", market.Symbol, err)
 				continue
