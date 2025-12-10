@@ -135,7 +135,3 @@ docker-compose up --build
 4. Cập nhật Order status & Wallet balance
 5. Broadcast qua WebSocket
 ```
-
-## 📝 License
-
-MIT
