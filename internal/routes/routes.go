@@ -47,3 +47,11 @@ func OrderRoutes(r *gin.Engine, h *handler.Handler) {
 		orders.PUT("/:id", h.OrderHandler.Amend)
 	}
 }
+
+func HealthRoutes(r *gin.Engine) {
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ok",
+		})
+	})
+}

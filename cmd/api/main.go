@@ -76,6 +76,7 @@ func main() {
 	handle := handler.NewHandler(orderService, marketRepo, orderRepo, cacheService)
 
 	// Setup routes
+	routes.HealthRoutes(r) // Public health check for ECS/Docker
 	routes.AuthRoutes(r, db)
 	routes.WebSocketRoutes(r, handle)
 	routes.MarketRoutes(r, handle)

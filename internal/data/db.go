@@ -22,9 +22,14 @@ func NewPostgres() (*Postgres, error) {
 	pass := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB_NAME")
 
+	sslmode := os.Getenv("POSTGRES_SSLMODE")
+	if sslmode == "" {
+		sslmode = "require" // default require for production (RDS)
+	}
+
 	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable", // sslmode=require for publish
-		user, pass, host, port, dbname,
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		user, pass, host, port, dbname, sslmode,
 	)
 
 	db, err := sql.Open("pgx", dsn)
